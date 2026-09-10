@@ -1,0 +1,24 @@
+services:
+  starshot-notif:
+    build: .
+    container_name: starshot-notif
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # A human signs in through noVNC, so the browser must be headed.
+      HEADLESS: "false"
+      STATE_DIR: /app/state
+    volumes:
+      - ./state:/app/state
+    ports:
+      # Bound to loopback ON PURPOSE. This container holds a live authenticated
+      # Apple session - anyone who reaches this port can use it. Reach it with:
+      #   ssh -N -L 6080:localhost:6080 you@this-server
+      - "127.0.0.1:6080:6080"
+    # Each account runs its own Chromium, all held open at once. Five accounts
+    # is roughly 3-5GB of RAM; size the host accordingly.
+    shm_size: "2gb"
+    deploy:
+      resources:
+        limits:
+          memory: 8g

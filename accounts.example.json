@@ -1,0 +1,22 @@
+[
+  {
+    "name": "acct-1",
+    "label": "Main account",
+    "webhook": null
+  },
+  {
+    "name": "acct-2",
+    "label": "Second account",
+    "webhook": null
+  },
+  {
+    "name": "acct-3",
+    "label": "Third account",
+    "webhook": null
+  },
+  {
+    "name": "acct-4",
+    "label": "Fourth account",
+    "webhook": "https://discord.com/api/webhooks/OPTIONAL/PER-ACCOUNT-CHANNEL"
+  }
+]
