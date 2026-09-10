@@ -1,0 +1,177 @@
+name: Deploy to VPS
+
+# Manual only, on purpose. A deploy restarts the container, which closes every
+# browser and signs out ALL accounts — each one then needs a fresh 2FA sign-in
+# through noVNC. That is far too expensive to trigger on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY to confirm — this signs out ALL accounts'
+        required: true
+        default: ''
+      image_tag:
+        description: 'Image tag to deploy (default: this commit)'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  guard:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
+            echo "::error::Type DEPLOY in the confirm box. Every deploy costs 5 sign-ins."
+            exit 1
+          fi
+          echo "Confirmed."
+
+  test:
+    name: Tests
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+      - name: Run test suites
+        run: ./tests/run_all.sh
+
+  build:
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image reference
+        id: meta
+        run: |
+          tag="${{ inputs.image_tag }}"
+          [ -n "$tag" ] || tag="sha-${GITHUB_SHA::12}"
+          repo=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${{ env.REGISTRY }}/${repo}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "latest=${{ env.REGISTRY }}/${repo}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          HOST: ${{ secrets.VPS_HOST }}
+          PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::VPS_KNOWN_HOSTS not set — trusting the key on first sight."
+            ssh-keyscan -p "${PORT:-22}" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Copy compose file
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+          PORT: ${{ secrets.VPS_PORT }}
+          DIR: ${{ secrets.VPS_PATH }}
+        run: |
+          scp -i ~/.ssh/id_deploy -P "${PORT:-22}" \
+              docker-compose.prod.yml "$USER@$HOST:$DIR/docker-compose.prod.yml"
+
+      - name: Pull and restart
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+          PORT: ${{ secrets.VPS_PORT }}
+          DIR: ${{ secrets.VPS_PATH }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${PORT:-22}" "$USER@$HOST" \
+              IMAGE="$IMAGE" DIR="$DIR" GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" \
+              'bash -euo pipefail -s' <<'REMOTE'
+          cd "$DIR"
+
+          # Preflight: never tear down a working deployment for a broken one.
+          # Both files are gitignored and live only on the server.
+          [ -f .env ]           || { echo "FATAL: $DIR/.env is missing"; exit 1; }
+          [ -f accounts.json ]  || { echo "FATAL: $DIR/accounts.json is missing"; exit 1; }
+          mkdir -p state
+
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          fi
+
+          export STARSHOT_IMAGE="$IMAGE"
+          echo "Deploying $STARSHOT_IMAGE"
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d
+          docker compose -f docker-compose.prod.yml ps
+          docker image prune -f >/dev/null 2>&1 || true
+          REMOTE
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`${{ needs.build.outputs.image }}\`"
+            echo ""
+            echo "**All accounts are now signed out.** The container restarted, which"
+            echo "closes every browser and drops every AppleConnect session."
+            echo ""
+            echo "To bring them back:"
+            echo ""
+            echo '```bash'
+            echo "ssh -N -L 6080:localhost:6080 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+            echo '```'
+            echo ""
+            echo "Then open <http://localhost:6080/vnc.html> and sign in to each"
+            echo "account in turn as the watcher presents it."
+          } >> "$GITHUB_STEP_SUMMARY"

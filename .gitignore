@@ -1,5 +1,21 @@
+# Secrets and live session material — never commit
 .env
+.env.*
+!.env.example
 state/
+profile.tgz
+*.tgz
+
+# Account config can carry per-account webhook URLs, and names your accounts.
+# Keep it on the server; accounts.example.json is the committed template.
+accounts.json
+accounts.*.json
+!accounts.example.json
+
+# Local captures — page.html contains your name and session-specific markup
+discovery/
+
+# Python
+.venv/
 __pycache__/
 *.pyc
-discovery/
