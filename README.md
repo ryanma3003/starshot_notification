@@ -250,11 +250,25 @@ live authenticated Apple sessions. Write it **by hand on the server**. It is a
 one-time job that rarely changes, and keeping it off GitHub means one fewer
 system holding the password to your accounts.
 
-Create the file with tight permissions *before* it has any content, so there is
-no moment where a secret sits in a world-readable file:
+First make sure the directory exists and is yours — `install` does not create
+parent directories, and a root-owned path will refuse the write:
+
+```bash
+sudo mkdir -p /your/vps/path/state && sudo chown -R "$USER:$USER" /your/vps/path && chmod 750 /your/vps/path
+```
+
+Then create the file with tight permissions *before* it has any content, so
+there is no moment where a secret sits in a world-readable file:
 
 ```bash
 install -m 600 /dev/null /your/vps/path/.env
+```
+
+Equivalently, if you would rather not use `install` — `umask 077` makes the new
+file `600` from the moment it exists:
+
+```bash
+umask 077 && : > /your/vps/path/.env
 ```
 
 Then fill it in with an editor — **not** `echo` or `cat >>`, which write the
