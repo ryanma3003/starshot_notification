@@ -227,6 +227,24 @@ The OAuth client needs the `auth_keys` scope and must be allowed to use
 `action: "accept"` matters — `"check"` demands interactive re-authentication,
 which a CI runner cannot satisfy, and the deploy will hang until it times out.
 
+### Build architecture
+
+The VPS is **arm64**, and GitHub's default runners are amd64, so the image is
+cross-built under QEMU. That is correct but slow — expect the build job to take
+tens of minutes, mostly emulating the apt install and the Chromium download.
+Buildx layer caching means unchanged layers are reused on later deploys.
+
+Two optional repository **variables** (not secrets) tune this:
+
+| Variable | Default | Use |
+|---|---|---|
+| `BUILD_PLATFORMS` | `linux/arm64` | set to `linux/amd64,linux/arm64` to publish both |
+| `BUILD_RUNNER` | `ubuntu-latest` | set to `ubuntu-24.04-arm` for a native, much faster build — needs native ARM runners, which are free for public repos and otherwise a Team/Enterprise feature |
+
+If the emulated build becomes too slow to live with, the other option is to drop
+GHCR and build on the VPS itself — it is arm64, so that build is native. It
+costs VPS CPU and disk on every deploy instead of CI minutes.
+
 ### First-time server setup
 
 Two files are gitignored and must exist on the server before the first deploy —
