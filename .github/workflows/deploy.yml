@@ -97,23 +97,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up SSH
-        env:
-          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-          HOST: ${{ secrets.VPS_HOST }}
-          PORT: ${{ secrets.VPS_PORT }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          if [ -n "$KNOWN_HOSTS" ]; then
-            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::VPS_KNOWN_HOSTS not set — trusting the key on first sight."
-            ssh-keyscan -p "${PORT:-22}" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          fi
-          chmod 600 ~/.ssh/known_hosts
+      # Tailscale SSH: the runner joins the tailnet as an ephemeral tag:ci node
+      # and authenticates through tailnet ACLs. No SSH private key is stored in
+      # GitHub at all, and access is revoked by editing the ACL rather than by
+      # rotating a key.
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
 
       - name: Copy compose file
         env:
@@ -122,7 +115,7 @@ jobs:
           PORT: ${{ secrets.VPS_PORT }}
           DIR: ${{ secrets.VPS_PATH }}
         run: |
-          scp -i ~/.ssh/id_deploy -P "${PORT:-22}" \
+          scp -o StrictHostKeyChecking=accept-new -P "${PORT:-22}" \
               docker-compose.prod.yml "$USER@$HOST:$DIR/docker-compose.prod.yml"
 
       - name: Pull and restart
@@ -135,7 +128,7 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          ssh -i ~/.ssh/id_deploy -p "${PORT:-22}" "$USER@$HOST" \
+          ssh -o StrictHostKeyChecking=accept-new -p "${PORT:-22}" "$USER@$HOST" \
               IMAGE="$IMAGE" DIR="$DIR" GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" \
               'bash -euo pipefail -s' <<'REMOTE'
           cd "$DIR"
