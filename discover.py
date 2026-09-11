@@ -61,7 +61,7 @@ def safe_name(url: str, index: int) -> str:
 
 def main() -> int:
     # Discovery always runs headed: a fresh browser is never signed in, because
-    # AppleConnect's session cookie cannot be restored from disk.
+    # the SSO session cookie cannot be restored from disk.
     config.HEADLESS = False
 
     OUT.mkdir(exist_ok=True)
@@ -95,7 +95,7 @@ def main() -> int:
         browser.page.wait_for_timeout(2000)
 
         if not browser.app_is_rendered():
-            print("\nSign in with AppleConnect in the browser window that opened.")
+            print("\nSign in in the browser window that opened.")
             print(f"Waiting up to {config.LOGIN_TIMEOUT // 60} minutes. "
                   "Discovery starts automatically once the app loads.\n")
             if not browser.wait_until_logged_in(config.LOGIN_TIMEOUT):

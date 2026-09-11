@@ -4,7 +4,7 @@ set -euo pipefail
 
 if [ -z "${VNC_PASSWORD:-}" ]; then
     echo "FATAL: VNC_PASSWORD is not set." >&2
-    echo "This container holds a live, authenticated Apple session. Refusing to" >&2
+    echo "This container holds a live, authenticated session. Refusing to" >&2
     echo "start an unauthenticated VNC server. Set VNC_PASSWORD in your .env." >&2
     exit 1
 fi
@@ -35,6 +35,6 @@ echo "  noVNC ready. Tunnel to it, then open http://localhost:6080/vnc.html"
 echo "    ssh -N -L 6080:localhost:6080 you@this-server"
 echo
 
-# Headed, because a human has to complete AppleConnect sign-in in this window.
+# Headed, because a human has to complete SSO sign-in in this window.
 export HEADLESS=false
 exec python watch.py

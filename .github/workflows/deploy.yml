@@ -169,7 +169,7 @@ jobs:
             echo "### Deployed \`${{ needs.build.outputs.image }}\`"
             echo ""
             echo "**All accounts are now signed out.** The container restarted, which"
-            echo "closes every browser and drops every AppleConnect session."
+            echo "closes every browser and drops every SSO session."
             echo ""
             echo "To bring them back:"
             echo ""

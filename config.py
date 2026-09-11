@@ -76,7 +76,7 @@ RELEASE_MODE = _str("RELEASE_MODE", "session").lower()
 
 STATE_DIR = Path(_str("STATE_DIR", "./state")).expanduser()
 SESSION_FILE = STATE_DIR / "session.json"
-# A whole browser profile, not just cookies. Apple SSO keeps session state in
+# A whole browser profile, not just cookies. The SSO provider keeps state in
 # places storage_state does not capture (IndexedDB, partitioned cookies), so we
 # persist the entire profile directory instead.
 PROFILE_DIR = STATE_DIR / "profile"
