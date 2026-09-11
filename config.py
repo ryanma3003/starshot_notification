@@ -27,7 +27,10 @@ def _bool(name: str, default: bool = False) -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
-TARGET_URL = _str("STARSHOT_URL", "https://starshot.scilliance.com/?broker=true")
+# No default on purpose: the target is deployment configuration, not something
+# this repository should name. A missing value fails loudly rather than quietly
+# requesting the wrong host.
+TARGET_URL = _str("STARSHOT_URL")
 
 DISCORD_WEBHOOK_URL = _str("DISCORD_WEBHOOK_URL")
 DISCORD_MENTION = _str("DISCORD_MENTION")
@@ -90,6 +93,8 @@ class ConfigError(RuntimeError):
 def validate() -> None:
     """Fail fast with an actionable message rather than dying mid-poll."""
     missing = []
+    if not TARGET_URL:
+        missing.append("STARSHOT_URL")
     if not DISCORD_WEBHOOK_URL:
         missing.append("DISCORD_WEBHOOK_URL")
     if missing:
@@ -115,6 +120,15 @@ def validate() -> None:
     if EXTRACT_MODE not in ("broker", "dom", "api"):
         raise ConfigError(
             f"EXTRACT_MODE must be 'broker', 'dom' or 'api', got {EXTRACT_MODE!r}")
+
+
+def require_target_url() -> None:
+    """For entry points that do not run the full validate()."""
+    if not TARGET_URL:
+        raise ConfigError(
+            "STARSHOT_URL is not set. Put the broker page URL in your .env - "
+            "there is no built-in default."
+        )
 
 
 def ensure_state_dir() -> None:

@@ -24,6 +24,7 @@ WAIT_SECONDS = config.LOGIN_TIMEOUT
 
 
 def main() -> int:
+    config.require_target_url()
     config.ensure_state_dir()
 
     # Always headed - the whole point is that a human drives this.

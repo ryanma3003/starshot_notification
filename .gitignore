@@ -1,7 +1,7 @@
 # Secrets and live session material — never commit
 .env
+.env.example
 .env.*
-!.env.example
 state/
 profile.tgz
 *.tgz

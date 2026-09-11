@@ -60,6 +60,8 @@ def safe_name(url: str, index: int) -> str:
 
 
 def main() -> int:
+    config.require_target_url()
+
     # Discovery always runs headed: a fresh browser is never signed in, because
     # the SSO session cookie cannot be restored from disk.
     config.HEADLESS = False
