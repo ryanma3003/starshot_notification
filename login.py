@@ -1,5 +1,5 @@
 """Interactive sign-in. Opens a real browser window so you can complete
-AppleConnect auth yourself - password, 2FA, security key, whatever it asks for.
+SSO auth yourself - password, 2FA, security key, whatever it asks for.
 
 Nothing here types your password. You do. This script only waits for you to
 finish, then saves the resulting session cookies to state/session.json.
@@ -24,13 +24,14 @@ WAIT_SECONDS = config.LOGIN_TIMEOUT
 
 
 def main() -> int:
+    config.require_target_url()
     config.ensure_state_dir()
 
     # Always headed - the whole point is that a human drives this.
     config.HEADLESS = False
 
     print("\nOpening a browser window.")
-    print("Sign in with your AppleConnect account when it appears.")
+    print("Sign in with your account when it appears.")
     print(f"Waiting up to {WAIT_SECONDS // 60} minutes for you to finish.\n")
 
     with Browser() as browser:

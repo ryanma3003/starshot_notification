@@ -1,32 +1,32 @@
 # Starshot task notifier
 
-Watches `https://starshot.scilliance.com/?broker=true` across **several accounts**
-and posts to Discord when new tasks appear in any of their broker queues. Each
-notification says which account it came from.
+Watches a task-broker page across **several accounts** and posts to Discord when
+work becomes available in any of their queues. Each notification says which
+account it came from. The target URL is configuration, not code — set
+`STARSHOT_URL` in your `.env`.
 
-## What this site is, and why the design looks like this
+## Why the design looks like this
 
-Investigated before building, because it dictates the whole architecture:
+Investigated against the real site before building, because it dictates the
+whole architecture:
 
-- It's a React single-page app titled **"Annotation Tool"**. The raw HTML is an
-  empty shell — nothing to scrape without running JavaScript.
-- It sits behind **Apple SSO (AppleConnect)**. The URL redirects to
-  `idmsac.apple.com`, then back through Keycloak (`auth.scilliance.com`, realm
-  `tag-crowd`, client `aiml-tag-platform`).
+- The page is a **React single-page app**. The raw HTML is an empty shell —
+  nothing to scrape without running JavaScript.
+- It sits behind **corporate SSO with 2FA**, brokered through Keycloak.
 - **The auth cookies are session-scoped.** Measured from a real login:
 
-  | cookie | host | persistent? | lifetime |
-  |---|---|---|---|
-  | `aasp` | `.idmsac.apple.com` | **no** | dies on browser close |
-  | `AUTH_SESSION_ID` | `auth.scilliance.com` | **no** | dies on browser close |
-  | `idmsac-ext-aa` | `.apple.com` | yes | ~1 hour |
-  | `KEYCLOAK_SESSION` | `auth.scilliance.com` | yes | ~3 hours |
+  | cookie | persistent? | lifetime |
+  |---|---|---|
+  | the IdP's session cookie | **no** | dies on browser close |
+  | the SSO broker's session cookie | **no** | dies on browser close |
+  | IdP supporting cookie | yes | ~1 hour |
+  | broker session cookie | yes | ~3 hours |
 
-`aasp` is AppleConnect's auth session cookie and it is deliberately
-session-scoped. Chromium clears session cookies on a **graceful** shutdown — that
-is what a session cookie means — so auth normally does not survive a restart.
-Saving `storage_state` does not work; persisting the whole browser profile does
-not reliably work either. Both were tried and both fell back to the sign-in page.
+The identity provider's auth session cookie is deliberately session-scoped.
+Chromium clears session cookies on a **graceful** shutdown — that is what a
+session cookie means — so auth normally does not survive a restart. Saving
+`storage_state` does not work; persisting the whole browser profile does not
+reliably work either. Both were tried and both fell back to the sign-in page.
 
 One caveat, observed in testing: when the browser is **killed abruptly** rather
 than closed cleanly, Chromium never runs that cleanup, and the session cookies
@@ -83,7 +83,7 @@ cp .env.example .env
 
 Set `DISCORD_WEBHOOK_URL` (Discord: channel → **Settings → Integrations →
 Webhooks → New Webhook → Copy Webhook URL**) and `VNC_PASSWORD` (any strong
-password — it protects a live authenticated Apple session).
+password — it protects a live authenticated session).
 
 ### 2. Define your accounts
 
@@ -140,7 +140,7 @@ docker compose up -d --build
 ```
 
 The noVNC port is bound to **loopback only**, on purpose — the container holds a
-live authenticated Apple session, and anyone who can reach that port can use it.
+live authenticated session, and anyone who can reach that port can use it.
 Tunnel in from your laptop:
 
 ```bash
@@ -227,6 +227,24 @@ The OAuth client needs the `auth_keys` scope and must be allowed to use
 `action: "accept"` matters — `"check"` demands interactive re-authentication,
 which a CI runner cannot satisfy, and the deploy will hang until it times out.
 
+### Build architecture
+
+The VPS is **arm64**, and GitHub's default runners are amd64, so the image is
+cross-built under QEMU. That is correct but slow — expect the build job to take
+tens of minutes, mostly emulating the apt install and the Chromium download.
+Buildx layer caching means unchanged layers are reused on later deploys.
+
+Two optional repository **variables** (not secrets) tune this:
+
+| Variable | Default | Use |
+|---|---|---|
+| `BUILD_PLATFORMS` | `linux/arm64` | set to `linux/amd64,linux/arm64` to publish both |
+| `BUILD_RUNNER` | `ubuntu-latest` | set to `ubuntu-24.04-arm` for a native, much faster build — needs native ARM runners, which are free for public repos and otherwise a Team/Enterprise feature |
+
+If the emulated build becomes too slow to live with, the other option is to drop
+GHCR and build on the VPS itself — it is arm64, so that build is native. It
+costs VPS CPU and disk on every deploy instead of CI minutes.
+
 ### First-time server setup
 
 Two files are gitignored and must exist on the server before the first deploy —
@@ -246,7 +264,7 @@ it across deploys or you will be re-notified about tasks you have already seen.
 ### Creating .env safely on the server
 
 `.env` holds the Discord webhook and `VNC_PASSWORD`, and `VNC_PASSWORD` guards
-live authenticated Apple sessions. Write it **by hand on the server**. It is a
+live authenticated sessions. Write it **by hand on the server**. It is a
 one-time job that rarely changes, and keeping it off GitHub means one fewer
 system holding the password to your accounts.
 
@@ -305,7 +323,7 @@ Three honest limits on what those permissions buy you:
 If you would rather have a single source of truth, the alternative is to store
 the values as GitHub secrets and have the deploy write `.env` over SSH. That
 makes rotation a secrets edit, but it also puts the password to five
-authenticated Apple sessions into GitHub and passes it through a CI runner on
+authenticated sessions into GitHub and passes it through a CI runner on
 every deploy. For five accounts you sign into by hand anyway, the manual file is
 the smaller blast radius.
 
@@ -337,7 +355,7 @@ just appeared is always the one asking to be signed in. Nothing else is
 competing for your attention.
 
 This matters more than it looks: five identical Chromium windows all showing
-"AppleConnect Sign In" are otherwise indistinguishable, and signing an account
+the same sign-in page are otherwise indistinguishable, and signing an account
 into the wrong window would store its session under a different account's
 profile — every later notification would carry the wrong label.
 
@@ -418,17 +436,17 @@ asking for tasks.
 
 ## Before you run this
 
-This is Apple internal infrastructure, and you are presumably working on it under
-a contributor or vendor agreement. Two things worth checking yourself:
+You are presumably working on this platform under some contributor or vendor
+agreement. Three things worth checking yourself:
 
 1. **Whether automated polling of the task queue is permitted.** Many crowd-work
    agreements forbid scripted access, and enforcement is typically account
    termination rather than a warning.
 2. **Whether live sessions may run on a server you control.** The VPS holds an
-   authenticated Apple session in memory, for every account, for as long as the
+   authenticated session in memory, for every account, for as long as the
    watcher runs.
 3. **Whether operating several accounts this way is permitted.** Multi-accounting
-   is restricted under some crowd-work agreements independently of automation.
+   is restricted under some agreements independently of automation.
 
 The design is deliberately conservative — no credential automation, no 2FA
 circumvention, a gentle 5-minute interval, your own normal interactive login, and

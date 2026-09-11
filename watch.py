@@ -1,7 +1,7 @@
 """Poll the Starshot broker page for several accounts and push new tasks to Discord.
 
 Every account gets its own browser, and every browser stays open for the life of
-the process: AppleConnect's session cookie is session-scoped, so closing a browser
+the process: the SSO session cookie is session-scoped, so closing a browser
 signs that account out with no way to restore it from disk.
 """
 
@@ -84,7 +84,7 @@ class AccountWatcher:
 
         if config.HEADLESS:
             msg = (
-                "Cannot sign in: no visible browser. AppleConnect's session cookie "
+                "Cannot sign in: no visible browser. The SSO session cookie "
                 "cannot be restored from disk, so a human must sign in. Run with "
                 "HEADLESS=false and connect over noVNC."
             )

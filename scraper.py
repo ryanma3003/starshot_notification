@@ -138,7 +138,7 @@ class Browser:
     def __enter__(self):
         self._pw = _acquire_playwright()
 
-        # A persistent profile, not a serialized storage_state. Apple SSO keeps
+        # A persistent profile, not a serialized storage_state. The IdP keeps
         # session state in IndexedDB and partitioned cookies, which storage_state
         # silently drops - restoring it left us back at the sign-in page.
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ class Browser:
             log.debug("networkidle not reached; the app may poll continuously")
 
         if self.is_logged_out():
-            # Only a human can fix this: AppleConnect needs 2FA from your phone.
+            # Only a human can fix this: SSO needs 2FA from your phone.
             raise SessionExpired(
                 f"Not signed in (landed on {urlparse(self.page.url).netloc}). "
                 "Sign in again through noVNC in this account's browser window."

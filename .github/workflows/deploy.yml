@@ -51,7 +51,12 @@ jobs:
   build:
     name: Build and push image
     needs: test
-    runs-on: ubuntu-latest
+    # The VPS is arm64. GitHub's default runners are amd64, so the image is
+    # cross-built under QEMU - correct everywhere, but slow. If you ever get
+    # access to native ARM runners (public repos, or Team/Enterprise plans),
+    # set the BUILD_RUNNER variable to ubuntu-24.04-arm for a native build.
+    runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -59,6 +64,12 @@ jobs:
       image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+
+      # Lets an amd64 runner produce arm64 binaries. Skipped automatically when
+      # the runner is already the target architecture.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -83,6 +94,7 @@ jobs:
         with:
           context: .
           push: true
+          platforms: ${{ vars.BUILD_PLATFORMS || 'linux/arm64' }}
           tags: |
             ${{ steps.meta.outputs.image }}
             ${{ steps.meta.outputs.latest }}
@@ -157,7 +169,7 @@ jobs:
             echo "### Deployed \`${{ needs.build.outputs.image }}\`"
             echo ""
             echo "**All accounts are now signed out.** The container restarted, which"
-            echo "closes every browser and drops every AppleConnect session."
+            echo "closes every browser and drops every SSO session."
             echo ""
             echo "To bring them back:"
             echo ""

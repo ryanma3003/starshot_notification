@@ -16,7 +16,7 @@ services:
       # webhooks), so it is mounted from the server.
       - ./accounts.json:/app/accounts.json:ro
     ports:
-      # Loopback ONLY. This container holds live authenticated Apple sessions;
+      # Loopback ONLY. This container holds live authenticated sessions;
       # anyone who reaches this port inherits them. Use an SSH tunnel:
       #   ssh -N -L 6080:localhost:6080 you@this-server
       - "127.0.0.1:6080:6080"

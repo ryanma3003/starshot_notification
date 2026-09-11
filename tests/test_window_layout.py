@@ -16,7 +16,8 @@ import tempfile
 
 tmp = tempfile.mkdtemp()
 os.environ.update({"STATE_DIR": tmp, "DISCORD_WEBHOOK_URL": "https://hook/X",
-                   "EXTRACT_MODE": "broker", "SCREEN_GEOMETRY": "1920x1080x24"})
+                   "EXTRACT_MODE": "broker", "SCREEN_GEOMETRY": "1920x1080x24",
+                   "STARSHOT_URL": "https://example.invalid/?broker=true"})
 ROOT = _pl.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
