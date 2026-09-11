@@ -164,6 +164,195 @@ docker compose logs -f
 > HTTP reverse proxy. If you need access without SSH, terminate TLS in front of
 > it and add a second layer of authentication.
 
+## Continuous deployment
+
+`.github/workflows/ci.yml` runs on every push: syntax checks, compose validation,
+a guard that fails if any secret-bearing path becomes tracked, and the full test
+suite.
+
+`.github/workflows/deploy.yml` is **manual only** — Actions → *Deploy to VPS* →
+type `DEPLOY` in the confirm box. It is not wired to push, on purpose: a deploy
+restarts the container, which closes every browser and signs out **all** accounts.
+With five accounts that is five fresh 2FA sign-ins, which is far too expensive to
+trigger from a routine commit.
+
+It runs the tests, builds the image, pushes it to GHCR, then SSHes in and
+restarts against the new image.
+
+### Required GitHub secrets
+
+| Secret | What it is |
+|---|---|
+| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth client id |
+| `TS_OAUTH_SECRET` | Tailscale OAuth client secret |
+| `VPS_HOST` | the server's MagicDNS name or tailnet IP |
+| `VPS_USER` | SSH user on the server |
+| `VPS_PATH` | absolute path to the project directory on the server |
+| `VPS_PORT` | SSH port — optional, defaults to 22 |
+| `GHCR_TOKEN` | PAT with `read:packages`, so the server can pull. Not needed if the GHCR package is public |
+
+`GITHUB_TOKEN` is injected automatically — do not create it.
+
+**No SSH private key is stored in GitHub.** The runner joins the tailnet as an
+ephemeral `tag:ci` node and authenticates through Tailscale SSH, so access is
+governed by tailnet ACLs. Revoking deploy access is an ACL edit, not a key
+rotation, and there is no long-lived credential to leak.
+
+### Tailscale prerequisites
+
+On the server, Tailscale SSH must be enabled:
+
+```bash
+sudo tailscale up --ssh
+```
+
+The OAuth client needs the `auth_keys` scope and must be allowed to use
+`tag:ci`. In your tailnet policy:
+
+```jsonc
+"tagOwners": {
+  "tag:ci":     ["autogroup:admin"],
+  "tag:server": ["autogroup:admin"],
+},
+"ssh": [
+  {
+    "action": "accept",
+    "src":    ["tag:ci"],
+    "dst":    ["tag:server"],      // or the specific node
+    "users":  ["your-deploy-user"],
+  },
+],
+```
+
+`action: "accept"` matters — `"check"` demands interactive re-authentication,
+which a CI runner cannot satisfy, and the deploy will hang until it times out.
+
+### First-time server setup
+
+Two files are gitignored and must exist on the server before the first deploy —
+the deploy does a preflight check and aborts rather than tearing down a working
+container if either is missing:
+
+```bash
+mkdir -p /path/to/starshot_notif/state
+cd /path/to/starshot_notif
+# create .env       (webhook, VNC password — see .env.example)
+# create accounts.json (see accounts.example.json)
+```
+
+`state/` is a bind mount holding browser profiles and the seen-task lists. Keep
+it across deploys or you will be re-notified about tasks you have already seen.
+
+### Creating .env safely on the server
+
+`.env` holds the Discord webhook and `VNC_PASSWORD`, and `VNC_PASSWORD` guards
+live authenticated Apple sessions. Write it **by hand on the server**. It is a
+one-time job that rarely changes, and keeping it off GitHub means one fewer
+system holding the password to your accounts.
+
+First make sure the directory exists and is yours — `install` does not create
+parent directories, and a root-owned path will refuse the write:
+
+```bash
+sudo mkdir -p /your/vps/path/state && sudo chown -R "$USER:$USER" /your/vps/path && chmod 750 /your/vps/path
+```
+
+Then create the file with tight permissions *before* it has any content, so
+there is no moment where a secret sits in a world-readable file:
+
+```bash
+install -m 600 /dev/null /your/vps/path/.env
+```
+
+Equivalently, if you would rather not use `install` — `umask 077` makes the new
+file `600` from the moment it exists:
+
+```bash
+umask 077 && : > /your/vps/path/.env
+```
+
+Then fill it in with an editor — **not** `echo` or `cat >>`, which write the
+secret into your shell history:
+
+```bash
+nano /your/vps/path/.env
+```
+
+Then verify, and lock down the directory:
+
+```bash
+stat -c '%a %U:%G %n' /your/vps/path/.env && chmod 750 /your/vps/path
+```
+
+You want `600` and your own user. Check for editor leftovers too — `vim` can
+leave a `.env.swp` with the same contents and laxer permissions:
+
+```bash
+ls -la /your/vps/path | grep -iE '\.env'
+```
+
+Three honest limits on what those permissions buy you:
+
+- **Anyone in the `docker` group can read the values regardless**, via
+  `docker inspect` or `docker exec … env`. The docker group is effectively root.
+  File permissions protect against other unprivileged users, not against someone
+  who can already run containers.
+- **VPS snapshots and backups contain the file.** If your provider stores
+  snapshots, the secrets are in them.
+- **Rotation is manual.** If the webhook leaks, delete it in Discord and write a
+  new one here; there is no automated path.
+
+If you would rather have a single source of truth, the alternative is to store
+the values as GitHub secrets and have the deploy write `.env` over SSH. That
+makes rotation a secrets edit, but it also puts the password to five
+authenticated Apple sessions into GitHub and passes it through a CI runner on
+every deploy. For five accounts you sign into by hand anyway, the manual file is
+the smaller blast radius.
+
+### Telling the five windows apart
+
+Every account has a **fixed position** on the container's 1920×1080 virtual
+screen, so the same account is always in the same place:
+
+```
+┌──────────────┬──────────────┬──────────────┐
+│ Account 1    │ Account 2    │ Account 3    │
+│ top-left     │ top-middle   │ top-right    │
+├──────────────┼──────────────┼──────────────┤
+│ Account 4    │ Account 5    │              │
+│ bottom-left  │ bottom-middle│              │
+└──────────────┴──────────────┴──────────────┘
+```
+
+The watcher prints the layout at startup and names the position in each sign-in
+banner:
+
+```
+  >>> Sign in now for: Account 3: IT  <<<
+  >>> Window: top-right of the screen  <<<
+```
+
+Browsers are also launched **one at a time, at their turn**, so the window that
+just appeared is always the one asking to be signed in. Nothing else is
+competing for your attention.
+
+This matters more than it looks: five identical Chromium windows all showing
+"AppleConnect Sign In" are otherwise indistinguishable, and signing an account
+into the wrong window would store its session under a different account's
+profile — every later notification would carry the wrong label.
+
+### After every deploy
+
+All accounts are signed out. Tunnel in and sign each back in:
+
+```bash
+ssh -N -L 6080:localhost:6080 you@your-server
+```
+
+Then <http://localhost:6080/vnc.html>, and sign in to each account as the
+watcher presents it. The workflow summary repeats these steps with your own
+host filled in.
+
 ## How it behaves
 
 - **Polls every 5 minutes** (`POLL_INTERVAL_SECONDS`).

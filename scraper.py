@@ -3,6 +3,8 @@
 import hashlib
 import json
 import logging
+import math
+import os
 import pathlib
 import re
 import time
@@ -76,14 +78,58 @@ def _release_playwright() -> None:
         _PW, _PW_REFS = None, 0
 
 
+def _screen_size(geometry: str | None = None) -> tuple[int, int]:
+    """Read the virtual screen size the container was started with."""
+    geom = geometry or os.getenv("SCREEN_GEOMETRY", "1920x1080x24")
+    match = re.match(r"(\d+)x(\d+)", geom)
+    return (int(match.group(1)), int(match.group(2))) if match else (1920, 1080)
+
+
+def _grid(total: int) -> tuple[int, int]:
+    cols = 1 if total <= 1 else (2 if total <= 4 else 3)
+    return cols, math.ceil(total / cols)
+
+
+def window_slot(index: int, total: int, geometry: str | None = None):
+    """Fixed screen position for an account's window.
+
+    Five identical Chromium windows on one screen are impossible to tell apart,
+    and signing an account into the wrong window would put its session in another
+    account's profile and mislabel every notification from then on. Tiling gives
+    each account a position that never changes.
+    """
+    screen_w, screen_h = _screen_size(geometry)
+    cols, rows = _grid(total)
+    width, height = screen_w // cols, screen_h // rows
+    col, row = index % cols, index // cols
+    return col * width, row * height, width, height
+
+
+def slot_name(index: int, total: int) -> str:
+    """Human description of that position, for the log and the sign-in banner."""
+    cols, rows = _grid(total)
+    col, row = index % cols, index // cols
+    # Column names depend on how many columns there are: with two, the second
+    # one is "right", not "middle".
+    names = {2: ["left", "right"], 3: ["left", "middle", "right"]}
+    horizontal = names.get(cols, [str(col + 1)])[col] if cols > 1 else ""
+    vertical = ["top", "bottom"][row] if rows > 1 else ""
+    if horizontal and vertical:
+        return f"{vertical}-{horizontal}"
+    return horizontal or vertical or "fullscreen"
+
+
 class Browser:
     """Owns the Playwright lifecycle and a persistent, reusable login session."""
 
-    def __init__(self, profile_dir=None, label: str = "default"):
+    def __init__(self, profile_dir=None, label: str = "default", window=None):
         # Each account needs its own profile directory: one browser per account,
         # all held open at once, because closing any of them signs that account out.
         self.profile_dir = pathlib.Path(profile_dir) if profile_dir else config.PROFILE_DIR
         self.label = label
+        # (x, y, width, height) for this account's window, or None to let the
+        # window manager place it.
+        self.window = window
         self._pw = None
         self._context = None
         self.page = None
@@ -101,11 +147,20 @@ class Browser:
             "[%s] %s browser profile at %s",
             self.label, "Reusing" if existed else "Creating", self.profile_dir,
         )
+        args = ["--no-sandbox", "--disable-dev-shm-usage"]  # required in Docker
+        kwargs = {"viewport": {"width": 1440, "height": 900}}
+        if self.window:
+            x, y, width, height = self.window
+            args += [f"--window-position={x},{y}", f"--window-size={width},{height}"]
+            # Let the OS window drive the page size, or the viewport and the
+            # window disagree and the page renders at the wrong size.
+            kwargs = {"no_viewport": True}
+
         self._context = self._pw.chromium.launch_persistent_context(
             user_data_dir=str(self.profile_dir),
             headless=config.HEADLESS,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],  # required in Docker
-            viewport={"width": 1440, "height": 900},
+            args=args,
+            **kwargs,
         )
         self._context.set_default_timeout(config.NAV_TIMEOUT_MS)
         self.page = self._context.pages[0] if self._context.pages else self._context.new_page()

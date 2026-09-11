@@ -1,0 +1,28 @@
+# Production compose: pulls the image built by CI instead of building locally.
+# STARSHOT_IMAGE is injected by the deploy workflow.
+services:
+  starshot-notif:
+    image: ${STARSHOT_IMAGE}
+    container_name: starshot-notif
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # A human signs in through noVNC, so the browser must be headed.
+      HEADLESS: "false"
+      STATE_DIR: /app/state
+    volumes:
+      - ./state:/app/state
+      # accounts.json is deliberately not in the image (it can carry per-account
+      # webhooks), so it is mounted from the server.
+      - ./accounts.json:/app/accounts.json:ro
+    ports:
+      # Loopback ONLY. This container holds live authenticated Apple sessions;
+      # anyone who reaches this port inherits them. Use an SSH tunnel:
+      #   ssh -N -L 6080:localhost:6080 you@this-server
+      - "127.0.0.1:6080:6080"
+    # Five accounts = five Chromium instances held open at once.
+    shm_size: "2gb"
+    deploy:
+      resources:
+        limits:
+          memory: 8g

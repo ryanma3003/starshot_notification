@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Syntax check
+        run: python -m compileall -q *.py tests/*.py
+
+      - name: Shell check
+        run: bash -n entrypoint.sh tests/run_all.sh
+
+      - name: Compose files are valid
+        run: |
+          docker compose -f docker-compose.yml config -q
+          STARSHOT_IMAGE=placeholder docker compose -f docker-compose.prod.yml config -q
+
+      - name: Secret leak guard
+        run: |
+          # These must never be tracked: real credentials and live session state.
+          # Checked one at a time - a combined --error-unmatch masks a hit when
+          # any other path is untracked.
+          bad=0
+          for p in .env accounts.json accounts.5accounts.json; do
+            if git ls-files --error-unmatch "$p" >/dev/null 2>&1; then
+              echo "::error::$p is tracked by git"; bad=1
+            fi
+          done
+          if [ -n "$(git ls-files state/ discovery/)" ]; then
+            echo "::error::state/ or discovery/ is tracked by git"; bad=1
+          fi
+          [ "$bad" -eq 0 ] && echo "no secret-bearing paths tracked"
+          exit $bad
+
+      - name: Run test suites
+        run: ./tests/run_all.sh
