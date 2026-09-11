@@ -30,8 +30,15 @@ jobs:
 
       - name: Compose files are valid
         run: |
+          # Both compose files declare `env_file: .env`, which is gitignored on
+          # purpose - it holds the webhook and VNC password. `docker compose
+          # config` refuses to run without it, so stand up a throwaway one just
+          # for validation and remove it again.
+          trap 'rm -f .env' EXIT
+          : > .env
           docker compose -f docker-compose.yml config -q
           STARSHOT_IMAGE=placeholder docker compose -f docker-compose.prod.yml config -q
+          echo "both compose files parse"
 
       - name: Secret leak guard
         run: |
