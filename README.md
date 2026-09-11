@@ -207,6 +207,38 @@ cd /path/to/starshot_notif
 `state/` is a bind mount holding browser profiles and the seen-task lists. Keep
 it across deploys or you will be re-notified about tasks you have already seen.
 
+### Telling the five windows apart
+
+Every account has a **fixed position** on the container's 1920×1080 virtual
+screen, so the same account is always in the same place:
+
+```
+┌──────────────┬──────────────┬──────────────┐
+│ Account 1    │ Account 2    │ Account 3    │
+│ top-left     │ top-middle   │ top-right    │
+├──────────────┼──────────────┼──────────────┤
+│ Account 4    │ Account 5    │              │
+│ bottom-left  │ bottom-middle│              │
+└──────────────┴──────────────┴──────────────┘
+```
+
+The watcher prints the layout at startup and names the position in each sign-in
+banner:
+
+```
+  >>> Sign in now for: Account 3: IT  <<<
+  >>> Window: top-right of the screen  <<<
+```
+
+Browsers are also launched **one at a time, at their turn**, so the window that
+just appeared is always the one asking to be signed in. Nothing else is
+competing for your attention.
+
+This matters more than it looks: five identical Chromium windows all showing
+"AppleConnect Sign In" are otherwise indistinguishable, and signing an account
+into the wrong window would store its session under a different account's
+profile — every later notification would carry the wrong label.
+
 ### After every deploy
 
 All accounts are signed out. Tunnel in and sign each back in:

@@ -13,7 +13,8 @@ import accounts as accounts_mod
 import config
 import notifier
 import state
-from scraper import Browser, ExtractionError, SessionExpired
+from scraper import (Browser, ExtractionError, SessionExpired,
+                     slot_name, window_slot)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,8 +30,12 @@ STAGGER_SECONDS = 3  # small gap between accounts, so we don't fire them at once
 class AccountWatcher:
     """One account: one browser, one seen-list, one Discord destination."""
 
-    def __init__(self, account: accounts_mod.Account):
+    def __init__(self, account: accounts_mod.Account, index: int = 0, total: int = 1):
         self.account = account
+        # Fixed screen position, so this account's window is always in the same
+        # place and can never be confused with another account's.
+        self.index, self.total = index, total
+        self.slot = slot_name(index, total)
         self.browser: Browser | None = None
         self.failures = 0
         self.alerted = False
@@ -44,7 +49,9 @@ class AccountWatcher:
 
     def start(self) -> None:
         self.browser = Browser(
-            profile_dir=self.account.profile_dir, label=self.account.name
+            profile_dir=self.account.profile_dir,
+            label=self.account.name,
+            window=window_slot(self.index, self.total),
         ).__enter__()
 
     def close(self) -> None:
@@ -87,10 +94,13 @@ class AccountWatcher:
             return False
 
         banner = f"  >>> Sign in now for: {self.account.label}  <<<"
-        print("\n" + "=" * len(banner)); print(banner); print("=" * len(banner))
+        where = f"  >>> Window: {self.slot} of the screen  <<<"
+        width = max(len(banner), len(where))
+        print("\n" + "=" * width); print(banner); print(where); print("=" * width)
         print(f"  (2FA will go to your phone. Waiting up to "
               f"{config.LOGIN_TIMEOUT // 60} minutes.)\n")
-        log.info("[%s] waiting for sign-in", self.account.label)
+        log.info("[%s] waiting for sign-in - %s window",
+                 self.account.label, self.slot)
 
         if self.browser.wait_until_logged_in(config.LOGIN_TIMEOUT):
             log.info("[%s] signed in", self.account.label)
@@ -230,16 +240,18 @@ def main() -> int:
     log.info("Watching %d account(s) every %ds (mode=%s)",
              len(accs), config.POLL_INTERVAL, config.EXTRACT_MODE)
 
-    watchers = [AccountWatcher(a) for a in accs]
+    watchers = [AccountWatcher(a, i, len(accs)) for i, a in enumerate(accs)]
+    for w in watchers:
+        log.info("  %s -> %s window", w.account.label, w.slot)
 
     try:
-        for w in watchers:
-            w.start()
-
         # Sequential on purpose: each account needs its own 2FA approval, and
-        # four browser windows all demanding attention at once is unusable.
+        # several browser windows all demanding attention at once is unusable.
+        # Each browser is launched at its turn, so the window that just appeared
+        # is always the one asking for a sign-in.
         signed_in = 0
         for w in watchers:
+            w.start()
             if w.bootstrap():
                 signed_in += 1
                 # Poll straight away rather than waiting for the loop. A task may
