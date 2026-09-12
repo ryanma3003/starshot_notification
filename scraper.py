@@ -277,10 +277,48 @@ class Browser:
             return self._tasks_from_broker()
         return self._tasks_from_dom()
 
-    def _tasks_from_broker(self) -> list[dict]:
-        """Starshot serves one task at a time, so availability is binary.
+    def _task_on_screen(self):
+        """The task currently loaded, or None if the page does not show one.
 
-        Keyed off stable hooks - the modal's text, the submit button's id, and
+        The Done button is always present in the DOM - it is `disabled` when no
+        task is loaded - so its existence proves nothing. Only an enabled button,
+        or an h1 whose aria-label carries a real id rather than "(undefined)",
+        is evidence of an actual task.
+        """
+        page = self.page
+        title, raw_id = "", None
+        try:
+            h1 = page.locator(config.TASK_TITLE_SELECTOR)
+            if h1.count() > 0:
+                aria = h1.first.get_attribute("aria-label") or ""
+                match = re.search(r"\(([^)]*)\)\s*$", aria)
+                if match and match.group(1).strip().lower() != "undefined":
+                    raw_id = match.group(1).strip()
+                title = (h1.first.inner_text() or "").strip()
+        except PlaywrightError:
+            pass
+
+        submit_enabled = False
+        try:
+            submit = page.locator(config.SUBMIT_BUTTON_SELECTOR)
+            submit_enabled = submit.count() > 0 and not submit.first.is_disabled()
+        except PlaywrightError:
+            pass
+
+        if not raw_id and not submit_enabled:
+            return None
+
+        title = title or raw_id or "Task available"
+        return {
+            "id": _task_id(raw_id, title),
+            "title": title[:250],
+            "detail": "A task is waiting in the broker. Open it to claim it.",
+        }
+
+    def _tasks_from_broker(self) -> list[dict]:
+        """The broker serves one task at a time, so availability is binary.
+
+        Keyed off stable hooks - the modal's text, the submit button's state, and
         the h1 aria-label - never the styled-components class hashes, which are
         regenerated on every frontend build.
         """
@@ -306,45 +344,36 @@ class Browser:
             except PlaywrightError as exc:
                 log.debug("[%s] retry click failed: %s", self.label, exc)
 
-        body = page.locator("body").inner_text() or ""
-        if config.NO_TASKS_TEXT.lower() in body.lower():
-            log.info("[%s] broker reports no available tasks", self.label)
-            return []
+        # Wait for the page to commit to an answer. The app shell renders before
+        # either the empty-queue modal or a task does, so deciding immediately -
+        # which is exactly what happens when polling right after sign-in -
+        # reports a task that is not there.
+        deadline = time.monotonic() + config.BROKER_SETTLE_SECONDS
+        body = ""
+        while True:
+            try:
+                body = page.locator("body").inner_text() or ""
+            except PlaywrightError:
+                body = ""
 
-        # No "no tasks" message. Confirm a task is really loaded before claiming
-        # one exists - an unrecognised error screen must not read as "task!".
-        title, raw_id = "", None
-        try:
-            h1 = page.locator(config.TASK_TITLE_SELECTOR)
-            if h1.count() > 0:
-                aria = h1.first.get_attribute("aria-label") or ""
-                match = re.search(r"\(([^)]*)\)\s*$", aria)
-                if match and match.group(1).strip().lower() != "undefined":
-                    raw_id = match.group(1).strip()
-                title = (h1.first.inner_text() or "").strip()
-        except PlaywrightError:
-            pass
+            if config.NO_TASKS_TEXT.lower() in body.lower():
+                log.info("[%s] broker reports no available tasks", self.label)
+                return []
 
-        has_submit = False
-        try:
-            has_submit = page.locator(config.SUBMIT_BUTTON_SELECTOR).count() > 0
-        except PlaywrightError:
-            pass
+            task = self._task_on_screen()
+            if task:
+                log.info("[%s] task available: %s", self.label, task["title"])
+                return [task]
 
-        if not raw_id and not has_submit:
-            raise ExtractionError(
-                "Neither the 'no available tasks' message nor a task was found. "
-                "The page is in an unrecognised state; refusing to guess. "
-                f"First 200 chars: {body[:200]!r}"
-            )
+            if time.monotonic() >= deadline:
+                break
+            page.wait_for_timeout(1000)
 
-        title = title or raw_id or "Task available"
-        log.info("[%s] task available: %s", self.label, title)
-        return [{
-            "id": _task_id(raw_id, title),
-            "title": title[:250],
-            "detail": "A task is waiting in the broker. Open Starshot to claim it.",
-        }]
+        raise ExtractionError(
+            "Page settled on neither the 'no available tasks' message nor a "
+            f"loaded task within {config.BROKER_SETTLE_SECONDS}s; refusing to "
+            f"guess. First 200 chars: {body[:200]!r}"
+        )
 
     def _tasks_from_dom(self) -> list[dict]:
         page = self.page

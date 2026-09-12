@@ -78,7 +78,11 @@ class AccountWatcher:
         page.wait_for_timeout(3000)
 
         if self.browser.app_is_rendered():
+            # Still announce it. An account whose session survived a restart is
+            # just as much "this account is now being watched" as one you had to
+            # sign in by hand, and a missing tick looks like a failure.
             log.info("[%s] already signed in", self.account.label)
+            notifier.notify_signed_in(self.account.label, self.account.webhook)
             self.signed_in = True
             return True
 
