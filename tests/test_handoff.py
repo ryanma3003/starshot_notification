@@ -106,4 +106,29 @@ assert fb2.released == 0, "should not clear cookies when closing outright"
 assert any("Handed over" in x for x in titles())
 print("  browser closed, account stopped. correct")
 
+print("\n=== REGRESSION: an already-signed-in account still announces itself ===")
+# A session that survived a restart is just as much "now being watched" as one
+# signed in by hand; a missing tick reads as a failed account.
+class FakePage:
+    def bring_to_front(self): pass
+    def goto(self, *a, **k): pass
+    def wait_for_timeout(self, *a, **k): pass
+
+class AlreadyIn(FakeBrowser):
+    def __init__(self):
+        super().__init__()
+        self.page = FakePage()
+    def app_is_rendered(self): return True
+
+config.RELEASE_ON_TASK = True
+config.HEADLESS = True
+w3 = watch.AccountWatcher(accounts.load()[0])
+w3.browser = AlreadyIn()
+posts.clear()
+assert w3.bootstrap() is True, "bootstrap should succeed when already signed in"
+t = titles()
+print("  discord:", t)
+assert any("Signed in" in x for x in t), f"no sign-in notice: {t}"
+print("  announced without needing a manual sign-in. correct")
+
 print("\nALL HAND-OFF ASSERTIONS PASSED")

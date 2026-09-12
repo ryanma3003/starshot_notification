@@ -66,6 +66,9 @@ SUBMIT_BUTTON_SELECTOR = _str("SUBMIT_BUTTON_SELECTOR", "#starshot_submit_button
 # Clicking "Try Again" REQUESTS a task, which may assign one to your account and
 # start its work timer. Off by default: see the README warning.
 CLICK_RETRY = _bool("CLICK_RETRY", False)
+# How long to let the page settle into a decisive state before giving up. The
+# shell renders before the empty-queue modal or a task does.
+BROKER_SETTLE_SECONDS = _int("BROKER_SETTLE_SECONDS", 20)
 
 # --- hand-off ----------------------------------------------------------------
 # When a task appears, drop this account's session so you can sign in on your own
